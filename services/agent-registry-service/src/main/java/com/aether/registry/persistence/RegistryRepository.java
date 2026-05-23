@@ -1,0 +1,233 @@
+package com.aether.registry.persistence;
+
+import com.aether.registry.api.dto.AgentDtos.AgentResponse;
+import com.aether.registry.api.dto.AgentDtos.AgentVersionResponse;
+import com.aether.registry.api.dto.ExportDtos.ExportJobResponse;
+import com.aether.registry.api.dto.TenantDtos.TenantResponse;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.enterprise.context.ApplicationScoped;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+import javax.sql.DataSource;
+
+@ApplicationScoped
+public class RegistryRepository {
+  private final DataSource dataSource;
+  private final ObjectMapper objectMapper;
+
+  public RegistryRepository(DataSource dataSource, ObjectMapper objectMapper) {
+    this.dataSource = dataSource;
+    this.objectMapper = objectMapper;
+  }
+
+  public TenantResponse createTenant(String slug, String name) {
+    UUID id = UUID.randomUUID();
+    String sql = """
+        INSERT INTO tenants (id, slug, name, status)
+        VALUES (?, ?, ?, 'ACTIVE')
+        """;
+    executeUpdate(sql, ps -> {
+      ps.setObject(1, id);
+      ps.setString(2, slug);
+      ps.setString(3, name);
+    });
+    return new TenantResponse(id, slug, name, "ACTIVE");
+  }
+
+  public AgentResponse createAgent(UUID tenantId, String slug, String name, String description, UUID ownerUserId) {
+    UUID id = UUID.randomUUID();
+    String sql = """
+        INSERT INTO agents (id, tenant_id, slug, name, description, owner_user_id, status)
+        VALUES (?, ?, ?, ?, ?, ?, 'DRAFT')
+        """;
+    executeUpdate(sql, ps -> {
+      ps.setObject(1, id);
+      ps.setObject(2, tenantId);
+      ps.setString(3, slug);
+      ps.setString(4, name);
+      ps.setString(5, description);
+      ps.setObject(6, ownerUserId);
+    });
+    return new AgentResponse(id, tenantId, slug, name, description, ownerUserId, "DRAFT");
+  }
+
+  public Optional<AgentResponse> findAgent(UUID id) {
+    String sql = """
+        SELECT id, tenant_id, slug, name, description, owner_user_id, status
+        FROM agents
+        WHERE id = ?
+        """;
+    try (Connection connection = dataSource.getConnection();
+         PreparedStatement ps = connection.prepareStatement(sql)) {
+      ps.setObject(1, id);
+      try (ResultSet rs = ps.executeQuery()) {
+        if (!rs.next()) {
+          return Optional.empty();
+        }
+        return Optional.of(new AgentResponse(
+            rs.getObject("id", UUID.class),
+            rs.getObject("tenant_id", UUID.class),
+            rs.getString("slug"),
+            rs.getString("name"),
+            rs.getString("description"),
+            rs.getObject("owner_user_id", UUID.class),
+            rs.getString("status")
+        ));
+      }
+    } catch (SQLException e) {
+      throw new RegistryStorageException("Failed to load agent", e);
+    }
+  }
+
+  public AgentVersionResponse createAgentVersion(UUID agentId, String version, String runtimeType, String configHash, UUID createdBy) {
+    UUID id = UUID.randomUUID();
+    String sql = """
+        INSERT INTO agent_versions (id, agent_id, version, status, runtime_type, config_hash, created_by)
+        VALUES (?, ?, ?, 'DRAFT', ?, ?, ?)
+        """;
+    executeUpdate(sql, ps -> {
+      ps.setObject(1, id);
+      ps.setObject(2, agentId);
+      ps.setString(3, version);
+      ps.setString(4, runtimeType);
+      ps.setString(5, configHash);
+      ps.setObject(6, createdBy);
+    });
+    return new AgentVersionResponse(id, agentId, version, "DRAFT", runtimeType, configHash);
+  }
+
+  public ExportJobResponse requestExport(UUID agentId, UUID agentVersionId, String targetFormat, UUID requestedBy) {
+    UUID exportJobId = UUID.randomUUID();
+    UUID sagaId = UUID.randomUUID();
+    UUID messageId = UUID.randomUUID();
+    UUID outboxId = UUID.randomUUID();
+    UUID tenantId = loadTenantIdForAgentVersion(agentId, agentVersionId);
+
+    try (Connection connection = dataSource.getConnection()) {
+      boolean previousAutoCommit = connection.getAutoCommit();
+      connection.setAutoCommit(false);
+      try {
+        insertExportJob(connection, exportJobId, agentVersionId, sagaId, targetFormat, requestedBy);
+        insertExportRequestedOutboxEvent(connection, outboxId, messageId, sagaId, exportJobId, agentId, agentVersionId, tenantId, targetFormat, requestedBy);
+        connection.commit();
+      } catch (Exception e) {
+        connection.rollback();
+        throw e;
+      } finally {
+        connection.setAutoCommit(previousAutoCommit);
+      }
+    } catch (Exception e) {
+      throw new RegistryStorageException("Failed to request export", e);
+    }
+
+    return new ExportJobResponse(exportJobId, sagaId, agentVersionId, "PENDING", targetFormat);
+  }
+
+  private UUID loadTenantIdForAgentVersion(UUID agentId, UUID agentVersionId) {
+    String sql = """
+        SELECT a.tenant_id
+        FROM agents a
+        JOIN agent_versions av ON av.agent_id = a.id
+        WHERE a.id = ? AND av.id = ?
+        """;
+    try (Connection connection = dataSource.getConnection();
+         PreparedStatement ps = connection.prepareStatement(sql)) {
+      ps.setObject(1, agentId);
+      ps.setObject(2, agentVersionId);
+      try (ResultSet rs = ps.executeQuery()) {
+        if (!rs.next()) {
+          throw new RegistryNotFoundException("Agent version not found for agent");
+        }
+        return rs.getObject("tenant_id", UUID.class);
+      }
+    } catch (SQLException e) {
+      throw new RegistryStorageException("Failed to validate agent version", e);
+    }
+  }
+
+  private void insertExportJob(Connection connection, UUID exportJobId, UUID agentVersionId, UUID sagaId, String targetFormat, UUID requestedBy) throws SQLException {
+    String sql = """
+        INSERT INTO export_jobs (id, agent_version_id, saga_id, requested_by, status, target_format)
+        VALUES (?, ?, ?, ?, 'PENDING', ?)
+        """;
+    try (PreparedStatement ps = connection.prepareStatement(sql)) {
+      ps.setObject(1, exportJobId);
+      ps.setObject(2, agentVersionId);
+      ps.setObject(3, sagaId);
+      ps.setObject(4, requestedBy);
+      ps.setString(5, targetFormat);
+      ps.executeUpdate();
+    }
+  }
+
+  private void insertExportRequestedOutboxEvent(
+      Connection connection,
+      UUID outboxId,
+      UUID messageId,
+      UUID sagaId,
+      UUID exportJobId,
+      UUID agentId,
+      UUID agentVersionId,
+      UUID tenantId,
+      String targetFormat,
+      UUID requestedBy
+  ) throws Exception {
+    String payload = objectMapper.writeValueAsString(Map.of(
+        "exportJobId", exportJobId,
+        "agentId", agentId,
+        "agentVersionId", agentVersionId,
+        "tenantId", tenantId,
+        "targetFormat", targetFormat,
+        "requestedBy", requestedBy
+    ));
+    String headers = objectMapper.writeValueAsString(Map.of(
+        "messageId", messageId,
+        "sagaId", sagaId,
+        "correlationId", sagaId,
+        "schemaVersion", "1.0"
+    ));
+    String sql = """
+        INSERT INTO outbox_events (id, aggregate_type, aggregate_id, event_type, topic, payload, headers)
+        VALUES (?, 'agent_version', ?, 'agent.export.requested', 'agent.export.requested', ?::jsonb, ?::jsonb)
+        """;
+    try (PreparedStatement ps = connection.prepareStatement(sql)) {
+      ps.setObject(1, outboxId);
+      ps.setObject(2, agentVersionId);
+      ps.setString(3, payload);
+      ps.setString(4, headers);
+      ps.executeUpdate();
+    }
+  }
+
+  private void executeUpdate(String sql, StatementBinder binder) {
+    try (Connection connection = dataSource.getConnection();
+         PreparedStatement ps = connection.prepareStatement(sql)) {
+      binder.bind(ps);
+      ps.executeUpdate();
+    } catch (SQLException e) {
+      throw new RegistryStorageException("Registry database write failed", e);
+    }
+  }
+
+  @FunctionalInterface
+  private interface StatementBinder {
+    void bind(PreparedStatement preparedStatement) throws SQLException;
+  }
+
+  public static class RegistryStorageException extends RuntimeException {
+    public RegistryStorageException(String message, Throwable cause) {
+      super(message, cause);
+    }
+  }
+
+  public static class RegistryNotFoundException extends RuntimeException {
+    public RegistryNotFoundException(String message) {
+      super(message);
+    }
+  }
+}
