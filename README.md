@@ -16,11 +16,59 @@ The platform is designed around an identity-first, event-driven architecture:
 
 ## Architecture Documents
 
+Primary docs:
+
 - [Aegis Flow Blueprint](docs/aegis-flow-blueprint.md)
 - [Service Boundaries](docs/service-boundaries.md)
 - [Agent Registry Schema](docs/agent-registry-schema.sql)
 - [Kafka Topic Contract](docs/kafka-topic-contract.md)
 - [Agent Export Saga](docs/agent-export-saga.md)
+
+Delivery docs:
+
+- [HLD](doc/HLD.md)
+- [LLD](doc/LLD.md)
+- [UI/UX Mockup](doc/UI_UX_MOCKUP.md)
+- [Prototype Mock Responses](doc/PROTOTYPE_MOCK_RESPONSES.md)
+
+## Local Development
+
+Start the local stack:
+
+```bash
+docker compose up --build
+```
+
+Services:
+
+| Service | URL |
+| --- | --- |
+| Agent Registry Service | http://localhost:8081 |
+| Keycloak | http://localhost:8180 |
+| Kafka | localhost:9092 |
+| Redpanda Admin | http://localhost:9644 |
+| PostgreSQL | localhost:5432 |
+
+Development credentials:
+
+```text
+Keycloak admin: admin / admin
+Aether user: admin@aether.local / admin
+PostgreSQL: aether / aether
+Database: aether_registry
+```
+
+Agent Registry health check:
+
+```bash
+curl http://localhost:8081/q/health
+```
+
+OpenAPI:
+
+```text
+http://localhost:8081/q/openapi
+```
 
 ## High-Level Plan
 
