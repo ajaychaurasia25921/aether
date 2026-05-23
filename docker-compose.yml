@@ -1,0 +1,88 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: aether-postgres
+    environment:
+      POSTGRES_DB: aether_registry
+      POSTGRES_USER: aether
+      POSTGRES_PASSWORD: aether
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aether -d aether_registry"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  kafka:
+    image: redpandadata/redpanda:v24.3.6
+    container_name: aether-kafka
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp=1
+      - --memory=512M
+      - --reserve-memory=0M
+      - --node-id=0
+      - --check=false
+      - --kafka-addr=internal://0.0.0.0:29092,external://0.0.0.0:9092
+      - --advertise-kafka-addr=internal://kafka:29092,external://localhost:9092
+    ports:
+      - "9092:9092"
+      - "9644:9644"
+    volumes:
+      - kafka-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: aether-keycloak
+    command:
+      - start-dev
+      - --import-realm
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    ports:
+      - "8180:8080"
+    volumes:
+      - ./infra/keycloak/realm-aether.json:/opt/keycloak/data/import/realm-aether.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080; echo -e 'GET /realms/aether/.well-known/openid-configuration HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3; cat <&3 | grep -q issuer"]
+      interval: 10s
+      timeout: 5s
+      retries: 24
+
+  agent-registry-service:
+    build:
+      context: .
+      dockerfile: services/agent-registry-service/Dockerfile
+    container_name: aether-agent-registry-service
+    environment:
+      AETHER_REGISTRY_DB_URL: jdbc:postgresql://postgres:5432/aether_registry
+      AETHER_REGISTRY_DB_USERNAME: aether
+      AETHER_REGISTRY_DB_PASSWORD: aether
+      AETHER_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      AETHER_OIDC_AUTH_SERVER_URL: http://keycloak:8080/realms/aether
+      AETHER_OIDC_CLIENT_ID: agent-registry-service
+      AETHER_OIDC_CLIENT_SECRET: dev-secret
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  kafka-data:
