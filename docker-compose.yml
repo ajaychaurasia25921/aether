@@ -83,6 +83,19 @@ services:
       keycloak:
         condition: service_healthy
 
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: aether-frontend
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8081
+      NEXT_PUBLIC_USE_MOCKS: "true"
+    ports:
+      - "3000:3000"
+    depends_on:
+      - agent-registry-service
+
 volumes:
   postgres-data:
   kafka-data:
