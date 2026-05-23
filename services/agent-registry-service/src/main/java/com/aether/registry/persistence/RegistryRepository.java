@@ -10,6 +10,8 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -128,6 +130,52 @@ public class RegistryRepository {
     return new ExportJobResponse(exportJobId, sagaId, agentVersionId, "PENDING", targetFormat);
   }
 
+  public List<OutboxEvent> findPendingOutboxEvents(int limit) {
+    String sql = """
+        SELECT id, topic, payload::text, headers::text
+        FROM outbox_events
+        WHERE status = 'PENDING'
+        ORDER BY created_at
+        LIMIT ?
+        """;
+    List<OutboxEvent> events = new ArrayList<>();
+    try (Connection connection = dataSource.getConnection();
+         PreparedStatement ps = connection.prepareStatement(sql)) {
+      ps.setInt(1, limit);
+      try (ResultSet rs = ps.executeQuery()) {
+        while (rs.next()) {
+          events.add(new OutboxEvent(
+              rs.getObject("id", UUID.class),
+              rs.getString("topic"),
+              rs.getString("payload"),
+              rs.getString("headers")
+          ));
+        }
+      }
+      return events;
+    } catch (SQLException e) {
+      throw new RegistryStorageException("Failed to load pending outbox events", e);
+    }
+  }
+
+  public void markOutboxEventPublished(UUID id) {
+    String sql = """
+        UPDATE outbox_events
+        SET status = 'PUBLISHED', published_at = now()
+        WHERE id = ? AND status = 'PENDING'
+        """;
+    executeUpdate(sql, ps -> ps.setObject(1, id));
+  }
+
+  public void markOutboxEventFailed(UUID id) {
+    String sql = """
+        UPDATE outbox_events
+        SET status = 'FAILED'
+        WHERE id = ? AND status = 'PENDING'
+        """;
+    executeUpdate(sql, ps -> ps.setObject(1, id));
+  }
+
   private UUID loadTenantIdForAgentVersion(UUID agentId, UUID agentVersionId) {
     String sql = """
         SELECT a.tenant_id
@@ -217,6 +265,9 @@ public class RegistryRepository {
   @FunctionalInterface
   private interface StatementBinder {
     void bind(PreparedStatement preparedStatement) throws SQLException;
+  }
+
+  public record OutboxEvent(UUID id, String topic, String payload, String headers) {
   }
 
   public static class RegistryStorageException extends RuntimeException {
