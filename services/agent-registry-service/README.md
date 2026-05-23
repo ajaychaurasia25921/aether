@@ -23,7 +23,13 @@ Expected local dependencies:
 Run database migrations automatically at startup:
 
 ```bash
-mvn quarkus:dev
+gradle :services:agent-registry-service:quarkusDev
+```
+
+Build the service:
+
+```bash
+gradle :services:agent-registry-service:quarkusBuild
 ```
 
 Important config values are defined in:
