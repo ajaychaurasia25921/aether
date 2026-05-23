@@ -1,0 +1,131 @@
+{
+  "realm": "aether",
+  "enabled": true,
+  "displayName": "Aether / Aegis Flow",
+  "roles": {
+    "realm": [
+      { "name": "platform-admin", "description": "Full platform administrator" },
+      { "name": "tenant-admin", "description": "Tenant administrator" },
+      { "name": "agent-designer", "description": "Creates and configures agents" },
+      { "name": "operator", "description": "Operates deployments and runtime workflows" },
+      { "name": "auditor", "description": "Reads audit and compliance records" },
+      { "name": "viewer", "description": "Read-only access" }
+    ]
+  },
+  "clientScopes": [
+    {
+      "name": "agent:read",
+      "protocol": "openid-connect",
+      "description": "Read agent metadata"
+    },
+    {
+      "name": "agent:execute",
+      "protocol": "openid-connect",
+      "description": "Execute agent workflows"
+    },
+    {
+      "name": "agent:export",
+      "protocol": "openid-connect",
+      "description": "Export agent artifacts"
+    },
+    {
+      "name": "tool:invoke:crm",
+      "protocol": "openid-connect",
+      "description": "Invoke CRM tools"
+    },
+    {
+      "name": "memory:read",
+      "protocol": "openid-connect",
+      "description": "Read agent memory"
+    },
+    {
+      "name": "memory:write",
+      "protocol": "openid-connect",
+      "description": "Write agent memory"
+    },
+    {
+      "name": "workflow:transition",
+      "protocol": "openid-connect",
+      "description": "Advance workflow state"
+    },
+    {
+      "name": "event:publish",
+      "protocol": "openid-connect",
+      "description": "Publish platform events"
+    },
+    {
+      "name": "deployment:request",
+      "protocol": "openid-connect",
+      "description": "Request deployments"
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "agent-registry-service",
+      "name": "Agent Registry Service",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "secret": "dev-secret",
+      "defaultClientScopes": [
+        "profile",
+        "email"
+      ],
+      "optionalClientScopes": [
+        "agent:read",
+        "agent:export",
+        "event:publish"
+      ]
+    },
+    {
+      "clientId": "aether-dashboard",
+      "name": "Aether Dashboard",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": [
+        "http://localhost:3000/*"
+      ],
+      "webOrigins": [
+        "http://localhost:3000"
+      ],
+      "defaultClientScopes": [
+        "profile",
+        "email"
+      ],
+      "optionalClientScopes": [
+        "agent:read",
+        "agent:export",
+        "deployment:request"
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "admin@aether.local",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "admin@aether.local",
+      "firstName": "Aether",
+      "lastName": "Admin",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "platform-admin",
+        "agent-designer",
+        "operator",
+        "auditor"
+      ]
+    }
+  ]
+}
