@@ -2,6 +2,7 @@ package com.aether.registry.api;
 
 import com.aether.registry.persistence.RegistryRepository.RegistryNotFoundException;
 import com.aether.registry.persistence.RegistryRepository.RegistryStorageException;
+import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.ext.ExceptionMapper;
 import jakarta.ws.rs.ext.Provider;
@@ -10,7 +11,7 @@ import jakarta.ws.rs.ext.Provider;
 public class RegistryExceptionMapper implements ExceptionMapper<RuntimeException> {
   @Override
   public Response toResponse(RuntimeException exception) {
-    if (exception instanceof RegistryNotFoundException) {
+    if (exception instanceof RegistryNotFoundException || exception instanceof NotFoundException) {
       return Response.status(Response.Status.NOT_FOUND)
           .entity(new ErrorResponse("NOT_FOUND", exception.getMessage()))
           .build();
