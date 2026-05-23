@@ -43,6 +43,7 @@ Services:
 
 | Service | URL |
 | --- | --- |
+| Frontend Dashboard | http://localhost:3000 |
 | Agent Registry Service | http://localhost:8081 |
 | Keycloak | http://localhost:8180 |
 | Kafka | localhost:9092 |
@@ -62,6 +63,14 @@ Agent Registry health check:
 
 ```bash
 curl http://localhost:8081/q/health
+```
+
+Frontend local dev:
+
+```bash
+cd frontend
+npm install
+npm run dev
 ```
 
 OpenAPI:
