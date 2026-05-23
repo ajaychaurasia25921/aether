@@ -12,6 +12,7 @@ It provides:
 - Agent version creation
 - Export job creation
 - Transactional outbox event creation for `agent.export.requested`
+- Scheduled outbox publishing to Kafka
 
 ## 2. Agent Registry API
 
@@ -145,16 +146,24 @@ com.aether.registry
   api
     AgentResource
     TenantResource
+    RegistryExceptionMapper
     dto
   persistence
     RegistryRepository
   outbox
-    OutboxEventWriter
+    OutboxPublisher
 ```
 
-## 6. Next Implementation Steps
+## 6. Gradle Commands
 
-- Add outbox Kafka relay
+```bash
+gradle :services:agent-registry-service:quarkusDev
+gradle :services:agent-registry-service:quarkusBuild
+gradle :services:agent-registry-service:test
+```
+
+## 7. Next Implementation Steps
+
 - Add inbox consumer for export completion and failure
 - Add Keycloak role and scope enforcement annotations
 - Add integration tests with PostgreSQL test resource
