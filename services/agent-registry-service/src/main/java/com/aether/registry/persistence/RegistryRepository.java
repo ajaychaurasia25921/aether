@@ -2,10 +2,14 @@ package com.aether.registry.persistence;
 
 import com.aether.registry.api.dto.AgentDtos.AgentResponse;
 import com.aether.registry.api.dto.AgentDtos.AgentVersionResponse;
+import com.aether.registry.api.dto.ControlPlaneDtos.AgentListItem;
+import com.aether.registry.api.dto.ControlPlaneDtos.DlqListItem;
+import com.aether.registry.api.dto.ControlPlaneDtos.ExportJobListItem;
 import com.aether.registry.api.dto.ExportDtos.ExportJobResponse;
 import com.aether.registry.api.dto.TenantDtos.TenantResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
+import java.time.OffsetDateTime;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -83,6 +87,58 @@ public class RegistryRepository {
       }
     } catch (SQLException e) {
       throw new RegistryStorageException("Failed to load agent", e);
+    }
+  }
+
+  public List<AgentListItem> listAgents() {
+    String sql = """
+        SELECT
+          a.id,
+          a.tenant_id,
+          a.slug,
+          a.name,
+          a.description,
+          a.status,
+          av.version AS latest_version,
+          av.runtime_type,
+          COALESCE(ej.status, 'NEVER') AS last_export_status
+        FROM agents a
+        LEFT JOIN LATERAL (
+          SELECT id, version, runtime_type
+          FROM agent_versions
+          WHERE agent_id = a.id
+          ORDER BY created_at DESC
+          LIMIT 1
+        ) av ON true
+        LEFT JOIN LATERAL (
+          SELECT status
+          FROM export_jobs
+          WHERE agent_version_id = av.id
+          ORDER BY updated_at DESC
+          LIMIT 1
+        ) ej ON true
+        ORDER BY a.created_at DESC
+        """;
+    List<AgentListItem> agents = new ArrayList<>();
+    try (Connection connection = dataSource.getConnection();
+         PreparedStatement ps = connection.prepareStatement(sql);
+         ResultSet rs = ps.executeQuery()) {
+      while (rs.next()) {
+        agents.add(new AgentListItem(
+            rs.getObject("id", UUID.class),
+            rs.getObject("tenant_id", UUID.class),
+            rs.getString("slug"),
+            rs.getString("name"),
+            rs.getString("description"),
+            rs.getString("status"),
+            rs.getString("latest_version"),
+            rs.getString("runtime_type"),
+            rs.getString("last_export_status")
+        ));
+      }
+      return agents;
+    } catch (SQLException e) {
+      throw new RegistryStorageException("Failed to list agents", e);
     }
   }
 
@@ -298,6 +354,94 @@ public class RegistryRepository {
       ps.setString(12, payload);
       ps.setString(13, headers);
     });
+  }
+
+  public List<ExportJobListItem> listExportJobs() {
+    String sql = """
+        SELECT
+          ej.id,
+          ej.saga_id,
+          ej.agent_version_id,
+          a.name AS agent_name,
+          av.version,
+          ej.status,
+          ej.target_format,
+          ej.artifact_uri,
+          ej.error_message,
+          ej.updated_at
+        FROM export_jobs ej
+        JOIN agent_versions av ON av.id = ej.agent_version_id
+        JOIN agents a ON a.id = av.agent_id
+        ORDER BY ej.updated_at DESC
+        """;
+    List<ExportJobListItem> jobs = new ArrayList<>();
+    try (Connection connection = dataSource.getConnection();
+         PreparedStatement ps = connection.prepareStatement(sql);
+         ResultSet rs = ps.executeQuery()) {
+      while (rs.next()) {
+        jobs.add(new ExportJobListItem(
+            rs.getObject("id", UUID.class),
+            rs.getObject("saga_id", UUID.class),
+            rs.getObject("agent_version_id", UUID.class),
+            rs.getString("agent_name"),
+            rs.getString("version"),
+            rs.getString("status"),
+            rs.getString("target_format"),
+            rs.getString("artifact_uri"),
+            rs.getString("error_message"),
+            rs.getObject("updated_at", OffsetDateTime.class)
+        ));
+      }
+      return jobs;
+    } catch (SQLException e) {
+      throw new RegistryStorageException("Failed to list export jobs", e);
+    }
+  }
+
+  public List<DlqListItem> listDlqEvents() {
+    String sql = """
+        SELECT id, original_topic, dlq_topic, consumer_name, failure_class, failure_message,
+               retry_count, replay_eligible, dead_lettered_at
+        FROM dlq_events
+        WHERE replayed_at IS NULL
+        ORDER BY dead_lettered_at DESC
+        """;
+    List<DlqListItem> events = new ArrayList<>();
+    try (Connection connection = dataSource.getConnection();
+         PreparedStatement ps = connection.prepareStatement(sql);
+         ResultSet rs = ps.executeQuery()) {
+      while (rs.next()) {
+        events.add(new DlqListItem(
+            rs.getObject("id", UUID.class),
+            rs.getString("original_topic"),
+            rs.getString("dlq_topic"),
+            rs.getString("consumer_name"),
+            rs.getString("failure_class"),
+            rs.getString("failure_message"),
+            rs.getInt("retry_count"),
+            rs.getBoolean("replay_eligible"),
+            rs.getObject("dead_lettered_at", OffsetDateTime.class)
+        ));
+      }
+      return events;
+    } catch (SQLException e) {
+      throw new RegistryStorageException("Failed to list DLQ events", e);
+    }
+  }
+
+  public boolean markDlqEventReplayed(UUID dlqEventId) {
+    String sql = """
+        UPDATE dlq_events
+        SET replayed_at = now()
+        WHERE id = ? AND replay_eligible = true AND replayed_at IS NULL
+        """;
+    try (Connection connection = dataSource.getConnection();
+         PreparedStatement ps = connection.prepareStatement(sql)) {
+      ps.setObject(1, dlqEventId);
+      return ps.executeUpdate() == 1;
+    } catch (SQLException e) {
+      throw new RegistryStorageException("Failed to mark DLQ event for replay", e);
+    }
   }
 
   private UUID loadTenantIdForAgentVersion(UUID agentId, UUID agentVersionId) {
