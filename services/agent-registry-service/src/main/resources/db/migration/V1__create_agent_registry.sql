@@ -132,8 +132,6 @@ CREATE TABLE outbox_events (
   payload JSONB NOT NULL,
   headers JSONB NOT NULL DEFAULT '{}'::jsonb,
   status VARCHAR(40) NOT NULL DEFAULT 'PENDING',
-  retry_count INTEGER NOT NULL DEFAULT 0,
-  last_error TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   published_at TIMESTAMPTZ,
   CONSTRAINT ck_outbox_events_status CHECK (status IN ('PENDING', 'PUBLISHED', 'FAILED'))
@@ -153,24 +151,6 @@ CREATE TABLE inbox_events (
   CONSTRAINT ck_inbox_events_status CHECK (status IN ('RECEIVED', 'PROCESSED', 'FAILED', 'IGNORED'))
 );
 
-CREATE TABLE dlq_events (
-  id UUID PRIMARY KEY,
-  original_topic VARCHAR(200) NOT NULL,
-  dlq_topic VARCHAR(200) NOT NULL,
-  consumer_name VARCHAR(160) NOT NULL,
-  message_id VARCHAR(255),
-  saga_id UUID,
-  correlation_id UUID,
-  failure_class VARCHAR(180) NOT NULL,
-  failure_message TEXT NOT NULL,
-  retry_count INTEGER NOT NULL DEFAULT 0,
-  replay_eligible BOOLEAN NOT NULL DEFAULT false,
-  payload JSONB NOT NULL,
-  headers JSONB NOT NULL DEFAULT '{}'::jsonb,
-  dead_lettered_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  replayed_at TIMESTAMPTZ
-);
-
 CREATE INDEX ix_agents_tenant_id ON agents(tenant_id);
 CREATE INDEX ix_agent_versions_agent_id ON agent_versions(agent_id);
 CREATE INDEX ix_agent_versions_status ON agent_versions(status);
@@ -186,5 +166,3 @@ CREATE INDEX ix_saga_instances_status ON saga_instances(status);
 CREATE INDEX ix_outbox_events_status_created_at ON outbox_events(status, created_at);
 CREATE INDEX ix_outbox_events_aggregate ON outbox_events(aggregate_type, aggregate_id);
 CREATE INDEX ix_inbox_events_topic_consumer ON inbox_events(topic, consumer_name);
-CREATE INDEX ix_dlq_events_original_topic ON dlq_events(original_topic);
-CREATE INDEX ix_dlq_events_replay ON dlq_events(replay_eligible, dead_lettered_at);

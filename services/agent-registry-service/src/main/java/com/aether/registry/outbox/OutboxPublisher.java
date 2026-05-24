@@ -34,7 +34,7 @@ public class OutboxPublisher {
     this.exportRequestedEmitter = exportRequestedEmitter;
   }
 
-  @Scheduled(every = "5s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
+  @Scheduled(every = "5s", delayed = "10s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
   void publishPendingEvents() {
     List<OutboxEvent> events = repository.findPendingOutboxEvents(BATCH_SIZE);
     for (OutboxEvent event : events) {
