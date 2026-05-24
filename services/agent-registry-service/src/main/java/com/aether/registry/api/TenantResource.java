@@ -3,6 +3,7 @@ package com.aether.registry.api;
 import com.aether.registry.api.dto.TenantDtos.CreateTenantRequest;
 import com.aether.registry.api.dto.TenantDtos.TenantResponse;
 import com.aether.registry.persistence.RegistryRepository;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.validation.Valid;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.POST;
@@ -22,6 +23,7 @@ public class TenantResource {
   }
 
   @POST
+  @RolesAllowed({"platform-admin", "tenant-admin"})
   public Response createTenant(@Valid CreateTenantRequest request) {
     TenantResponse response = repository.createTenant(request.slug(), request.name());
     return Response.status(Response.Status.CREATED).entity(response).build();

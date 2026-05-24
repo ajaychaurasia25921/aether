@@ -7,6 +7,7 @@ import com.aether.registry.api.dto.AgentDtos.CreateAgentVersionRequest;
 import com.aether.registry.api.dto.ExportDtos.CreateExportRequest;
 import com.aether.registry.api.dto.ExportDtos.ExportJobResponse;
 import com.aether.registry.persistence.RegistryRepository;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.validation.Valid;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.GET;
@@ -30,6 +31,7 @@ public class AgentResource {
   }
 
   @POST
+  @RolesAllowed({"platform-admin", "tenant-admin", "agent-designer"})
   public Response createAgent(@Valid CreateAgentRequest request) {
     AgentResponse response = repository.createAgent(
         request.tenantId(),
@@ -43,6 +45,7 @@ public class AgentResource {
 
   @GET
   @Path("/{agentId}")
+  @RolesAllowed({"platform-admin", "tenant-admin", "agent-designer", "operator", "auditor", "viewer"})
   public AgentResponse getAgent(@PathParam("agentId") UUID agentId) {
     return repository.findAgent(agentId)
         .orElseThrow(() -> new NotFoundException("Agent not found"));
@@ -50,6 +53,7 @@ public class AgentResource {
 
   @POST
   @Path("/{agentId}/versions")
+  @RolesAllowed({"platform-admin", "tenant-admin", "agent-designer"})
   public Response createVersion(@PathParam("agentId") UUID agentId, @Valid CreateAgentVersionRequest request) {
     AgentVersionResponse response = repository.createAgentVersion(
         agentId,
@@ -63,6 +67,7 @@ public class AgentResource {
 
   @POST
   @Path("/{agentId}/versions/{agentVersionId}/export")
+  @RolesAllowed({"platform-admin", "tenant-admin", "agent-designer", "operator"})
   public Response requestExport(
       @PathParam("agentId") UUID agentId,
       @PathParam("agentVersionId") UUID agentVersionId,

@@ -23,6 +23,7 @@ Primary docs:
 - [Agent Registry Schema](docs/agent-registry-schema.sql)
 - [Kafka Topic Contract](docs/kafka-topic-contract.md)
 - [Agent Export Saga](docs/agent-export-saga.md)
+- [Agent Registry OpenAPI](docs/openapi/agent-registry.openapi.yaml)
 
 Delivery docs:
 
@@ -77,6 +78,12 @@ OpenAPI:
 
 ```text
 http://localhost:8081/q/openapi
+```
+
+Committed OpenAPI contract:
+
+```text
+docs/openapi/agent-registry.openapi.yaml
 ```
 
 ## High-Level Plan

@@ -32,6 +32,13 @@ Build the service:
 gradle :services:agent-registry-service:quarkusBuild
 ```
 
+OpenAPI:
+
+```text
+docs/openapi/agent-registry.openapi.yaml
+http://localhost:8081/q/openapi
+```
+
 Important config values are defined in:
 
 ```text

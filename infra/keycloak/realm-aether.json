@@ -81,6 +81,29 @@
       ]
     },
     {
+      "clientId": "aegis-agent-runtime-template",
+      "name": "Aegis Agent Runtime M2M Template",
+      "enabled": false,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "secret": "replace-per-agent-version",
+      "description": "Template copied by the identity broker for per-agent-version machine-to-machine clients.",
+      "defaultClientScopes": [
+        "profile"
+      ],
+      "optionalClientScopes": [
+        "agent:execute",
+        "tool:invoke:crm",
+        "memory:read",
+        "memory:write",
+        "workflow:transition",
+        "event:publish"
+      ]
+    },
+    {
       "clientId": "aether-dashboard",
       "name": "Aether Dashboard",
       "enabled": true,

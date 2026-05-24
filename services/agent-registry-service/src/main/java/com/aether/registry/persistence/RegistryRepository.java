@@ -2,10 +2,14 @@ package com.aether.registry.persistence;
 
 import com.aether.registry.api.dto.AgentDtos.AgentResponse;
 import com.aether.registry.api.dto.AgentDtos.AgentVersionResponse;
+import com.aether.registry.api.dto.ControlPlaneDtos.AgentListItem;
+import com.aether.registry.api.dto.ControlPlaneDtos.DlqListItem;
+import com.aether.registry.api.dto.ControlPlaneDtos.ExportJobListItem;
 import com.aether.registry.api.dto.ExportDtos.ExportJobResponse;
 import com.aether.registry.api.dto.TenantDtos.TenantResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
+import java.time.OffsetDateTime;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -86,6 +90,58 @@ public class RegistryRepository {
     }
   }
 
+  public List<AgentListItem> listAgents() {
+    String sql = """
+        SELECT
+          a.id,
+          a.tenant_id,
+          a.slug,
+          a.name,
+          a.description,
+          a.status,
+          av.version AS latest_version,
+          av.runtime_type,
+          COALESCE(ej.status, 'NEVER') AS last_export_status
+        FROM agents a
+        LEFT JOIN LATERAL (
+          SELECT id, version, runtime_type
+          FROM agent_versions
+          WHERE agent_id = a.id
+          ORDER BY created_at DESC
+          LIMIT 1
+        ) av ON true
+        LEFT JOIN LATERAL (
+          SELECT status
+          FROM export_jobs
+          WHERE agent_version_id = av.id
+          ORDER BY updated_at DESC
+          LIMIT 1
+        ) ej ON true
+        ORDER BY a.created_at DESC
+        """;
+    List<AgentListItem> agents = new ArrayList<>();
+    try (Connection connection = dataSource.getConnection();
+         PreparedStatement ps = connection.prepareStatement(sql);
+         ResultSet rs = ps.executeQuery()) {
+      while (rs.next()) {
+        agents.add(new AgentListItem(
+            rs.getObject("id", UUID.class),
+            rs.getObject("tenant_id", UUID.class),
+            rs.getString("slug"),
+            rs.getString("name"),
+            rs.getString("description"),
+            rs.getString("status"),
+            rs.getString("latest_version"),
+            rs.getString("runtime_type"),
+            rs.getString("last_export_status")
+        ));
+      }
+      return agents;
+    } catch (SQLException e) {
+      throw new RegistryStorageException("Failed to list agents", e);
+    }
+  }
+
   public AgentVersionResponse createAgentVersion(UUID agentId, String version, String runtimeType, String configHash, UUID createdBy) {
     UUID id = UUID.randomUUID();
     String sql = """
@@ -137,6 +193,7 @@ public class RegistryRepository {
         WHERE status = 'PENDING'
         ORDER BY created_at
         LIMIT ?
+        FOR UPDATE SKIP LOCKED
         """;
     List<OutboxEvent> events = new ArrayList<>();
     try (Connection connection = dataSource.getConnection();
@@ -170,10 +227,221 @@ public class RegistryRepository {
   public void markOutboxEventFailed(UUID id) {
     String sql = """
         UPDATE outbox_events
-        SET status = 'FAILED'
+        SET status = 'FAILED', retry_count = retry_count + 1
         WHERE id = ? AND status = 'PENDING'
         """;
     executeUpdate(sql, ps -> ps.setObject(1, id));
+  }
+
+  public boolean recordInboxReceived(String messageId, String topic, String consumerName, String payloadHash) {
+    UUID id = UUID.randomUUID();
+    String sql = """
+        INSERT INTO inbox_events (id, message_id, topic, consumer_name, payload_hash, status)
+        VALUES (?, ?, ?, ?, ?, 'RECEIVED')
+        """;
+    try (Connection connection = dataSource.getConnection();
+         PreparedStatement ps = connection.prepareStatement(sql)) {
+      ps.setObject(1, id);
+      ps.setString(2, messageId);
+      ps.setString(3, topic);
+      ps.setString(4, consumerName);
+      ps.setString(5, payloadHash);
+      ps.executeUpdate();
+      return true;
+    } catch (SQLException e) {
+      if ("23505".equals(e.getSQLState())) {
+        return false;
+      }
+      throw new RegistryStorageException("Failed to record inbox event", e);
+    }
+  }
+
+  public void markInboxProcessed(String messageId, String consumerName) {
+    String sql = """
+        UPDATE inbox_events
+        SET status = 'PROCESSED', processed_at = now()
+        WHERE message_id = ? AND consumer_name = ?
+        """;
+    executeUpdate(sql, ps -> {
+      ps.setString(1, messageId);
+      ps.setString(2, consumerName);
+    });
+  }
+
+  public void markInboxIgnored(String messageId, String consumerName) {
+    String sql = """
+        UPDATE inbox_events
+        SET status = 'IGNORED', processed_at = now()
+        WHERE message_id = ? AND consumer_name = ? AND status = 'RECEIVED'
+        """;
+    executeUpdate(sql, ps -> {
+      ps.setString(1, messageId);
+      ps.setString(2, consumerName);
+    });
+  }
+
+  public void markInboxFailed(String messageId, String consumerName, String errorMessage) {
+    String sql = """
+        UPDATE inbox_events
+        SET status = 'FAILED', processed_at = now(), error_message = ?
+        WHERE message_id = ? AND consumer_name = ?
+        """;
+    executeUpdate(sql, ps -> {
+      ps.setString(1, errorMessage);
+      ps.setString(2, messageId);
+      ps.setString(3, consumerName);
+    });
+  }
+
+  public void completeExportJob(UUID exportJobId, String artifactUri) {
+    String sql = """
+        UPDATE export_jobs
+        SET status = 'COMPLETED', artifact_uri = ?, updated_at = now()
+        WHERE id = ?
+        """;
+    executeUpdate(sql, ps -> {
+      ps.setString(1, artifactUri);
+      ps.setObject(2, exportJobId);
+    });
+  }
+
+  public void failExportJob(UUID exportJobId, String errorMessage) {
+    String sql = """
+        UPDATE export_jobs
+        SET status = 'FAILED', error_message = ?, updated_at = now()
+        WHERE id = ?
+        """;
+    executeUpdate(sql, ps -> {
+      ps.setString(1, errorMessage);
+      ps.setObject(2, exportJobId);
+    });
+  }
+
+  public void insertDlqEvent(
+      String originalTopic,
+      String dlqTopic,
+      String consumerName,
+      String messageId,
+      UUID sagaId,
+      UUID correlationId,
+      String failureClass,
+      String failureMessage,
+      int retryCount,
+      boolean replayEligible,
+      String payload,
+      String headers
+  ) {
+    UUID id = UUID.randomUUID();
+    String sql = """
+        INSERT INTO dlq_events (
+          id, original_topic, dlq_topic, consumer_name, message_id, saga_id, correlation_id,
+          failure_class, failure_message, retry_count, replay_eligible, payload, headers
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb)
+        """;
+    executeUpdate(sql, ps -> {
+      ps.setObject(1, id);
+      ps.setString(2, originalTopic);
+      ps.setString(3, dlqTopic);
+      ps.setString(4, consumerName);
+      ps.setString(5, messageId);
+      ps.setObject(6, sagaId);
+      ps.setObject(7, correlationId);
+      ps.setString(8, failureClass);
+      ps.setString(9, failureMessage);
+      ps.setInt(10, retryCount);
+      ps.setBoolean(11, replayEligible);
+      ps.setString(12, payload);
+      ps.setString(13, headers);
+    });
+  }
+
+  public List<ExportJobListItem> listExportJobs() {
+    String sql = """
+        SELECT
+          ej.id,
+          ej.saga_id,
+          ej.agent_version_id,
+          a.name AS agent_name,
+          av.version,
+          ej.status,
+          ej.target_format,
+          ej.artifact_uri,
+          ej.error_message,
+          ej.updated_at
+        FROM export_jobs ej
+        JOIN agent_versions av ON av.id = ej.agent_version_id
+        JOIN agents a ON a.id = av.agent_id
+        ORDER BY ej.updated_at DESC
+        """;
+    List<ExportJobListItem> jobs = new ArrayList<>();
+    try (Connection connection = dataSource.getConnection();
+         PreparedStatement ps = connection.prepareStatement(sql);
+         ResultSet rs = ps.executeQuery()) {
+      while (rs.next()) {
+        jobs.add(new ExportJobListItem(
+            rs.getObject("id", UUID.class),
+            rs.getObject("saga_id", UUID.class),
+            rs.getObject("agent_version_id", UUID.class),
+            rs.getString("agent_name"),
+            rs.getString("version"),
+            rs.getString("status"),
+            rs.getString("target_format"),
+            rs.getString("artifact_uri"),
+            rs.getString("error_message"),
+            rs.getObject("updated_at", OffsetDateTime.class)
+        ));
+      }
+      return jobs;
+    } catch (SQLException e) {
+      throw new RegistryStorageException("Failed to list export jobs", e);
+    }
+  }
+
+  public List<DlqListItem> listDlqEvents() {
+    String sql = """
+        SELECT id, original_topic, dlq_topic, consumer_name, failure_class, failure_message,
+               retry_count, replay_eligible, dead_lettered_at
+        FROM dlq_events
+        WHERE replayed_at IS NULL
+        ORDER BY dead_lettered_at DESC
+        """;
+    List<DlqListItem> events = new ArrayList<>();
+    try (Connection connection = dataSource.getConnection();
+         PreparedStatement ps = connection.prepareStatement(sql);
+         ResultSet rs = ps.executeQuery()) {
+      while (rs.next()) {
+        events.add(new DlqListItem(
+            rs.getObject("id", UUID.class),
+            rs.getString("original_topic"),
+            rs.getString("dlq_topic"),
+            rs.getString("consumer_name"),
+            rs.getString("failure_class"),
+            rs.getString("failure_message"),
+            rs.getInt("retry_count"),
+            rs.getBoolean("replay_eligible"),
+            rs.getObject("dead_lettered_at", OffsetDateTime.class)
+        ));
+      }
+      return events;
+    } catch (SQLException e) {
+      throw new RegistryStorageException("Failed to list DLQ events", e);
+    }
+  }
+
+  public boolean markDlqEventReplayed(UUID dlqEventId) {
+    String sql = """
+        UPDATE dlq_events
+        SET replayed_at = now()
+        WHERE id = ? AND replay_eligible = true AND replayed_at IS NULL
+        """;
+    try (Connection connection = dataSource.getConnection();
+         PreparedStatement ps = connection.prepareStatement(sql)) {
+      ps.setObject(1, dlqEventId);
+      return ps.executeUpdate() == 1;
+    } catch (SQLException e) {
+      throw new RegistryStorageException("Failed to mark DLQ event for replay", e);
+    }
   }
 
   private UUID loadTenantIdForAgentVersion(UUID agentId, UUID agentVersionId) {
