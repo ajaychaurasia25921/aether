@@ -22,7 +22,7 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
-button, input, select { font: inherit; }
+button, input, select, textarea { font: inherit; }
 
 .shell {
   display: grid;
@@ -48,14 +48,19 @@ button, input, select { font: inherit; }
   gap: 6px;
 }
 
-.nav a {
+.nav button {
+  appearance: none;
+  border: 0;
+  background: transparent;
   color: #d1d5db;
+  cursor: pointer;
   text-decoration: none;
   padding: 10px 12px;
   border-radius: 6px;
+  text-align: left;
 }
 
-.nav a.active, .nav a:hover {
+.nav button.active, .nav button:hover {
   background: #1f2937;
   color: white;
 }
@@ -101,6 +106,11 @@ h3 { font-size: 15px; }
   white-space: nowrap;
 }
 
+.primary-button:disabled, .secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .primary-button {
   background: var(--accent);
   color: white;
@@ -141,6 +151,19 @@ h3 { font-size: 15px; }
 
 .panel-body { padding: 16px; }
 
+.toast {
+  align-items: center;
+  background: #e6fffb;
+  border: 1px solid #99f6e4;
+  border-radius: 8px;
+  color: #134e4a;
+  display: flex;
+  font-size: 14px;
+  min-height: 40px;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+}
+
 .table {
   width: 100%;
   border-collapse: collapse;
@@ -179,6 +202,12 @@ h3 { font-size: 15px; }
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
+}
+
+.workflow-canvas {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 
 .node {
@@ -227,11 +256,148 @@ h3 { font-size: 15px; }
 
 .tool small { color: var(--muted); }
 
+.muted {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.empty-state {
+  color: var(--muted);
+  padding: 18px;
+  text-align: center;
+}
+
+.state-tree {
+  color: #233141;
+  font-size: 14px;
+  overflow: auto;
+}
+
+.state-tree ul {
+  border-left: 1px solid var(--border);
+  list-style: none;
+  margin: 4px 0 4px 10px;
+  padding-left: 12px;
+}
+
+.state-tree > ul {
+  border-left: 0;
+  margin-left: 0;
+}
+
+.state-tree li {
+  margin: 6px 0;
+}
+
+.code-block {
+  background: #101828;
+  color: #e6edf3;
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+  min-height: 340px;
+  overflow: auto;
+  padding: 16px;
+}
+
+.checklist {
+  display: grid;
+  gap: 12px;
+}
+
+.checklist label {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.settings-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.audit-list {
+  display: grid;
+  gap: 10px;
+}
+
+.audit-row {
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  padding: 10px;
+}
+
+.audit-row strong {
+  align-items: center;
+  background: var(--panel-muted);
+  border-radius: 999px;
+  display: inline-flex;
+  height: 28px;
+  justify-content: center;
+  width: 28px;
+}
+
+.audit-row small {
+  color: var(--muted);
+}
+
+.modal-backdrop {
+  align-items: center;
+  background: rgb(15 23 42 / 52%);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 20px;
+  position: fixed;
+  z-index: 20;
+}
+
+.modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 24px 80px rgb(15 23 42 / 28%);
+  max-width: 560px;
+  overflow: hidden;
+  width: min(100%, 560px);
+}
+
+.form-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.field span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.field input, .field select, .field textarea {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  width: 100%;
+}
+
+.field textarea {
+  resize: vertical;
+}
+
 @media (max-width: 980px) {
   .shell { grid-template-columns: 1fr; }
   .sidebar { position: static; }
   .dashboard-grid { grid-template-columns: 1fr; }
   .workflow { grid-template-columns: 1fr 1fr; }
+  .settings-grid { grid-template-columns: 1fr; }
   .topbar { align-items: stretch; flex-direction: column; }
   .actions { flex-wrap: wrap; }
   .search { width: 100%; }
