@@ -137,6 +137,7 @@ public class RegistryRepository {
         WHERE status = 'PENDING'
         ORDER BY created_at
         LIMIT ?
+        FOR UPDATE SKIP LOCKED
         """;
     List<OutboxEvent> events = new ArrayList<>();
     try (Connection connection = dataSource.getConnection();
@@ -170,10 +171,133 @@ public class RegistryRepository {
   public void markOutboxEventFailed(UUID id) {
     String sql = """
         UPDATE outbox_events
-        SET status = 'FAILED'
+        SET status = 'FAILED', retry_count = retry_count + 1
         WHERE id = ? AND status = 'PENDING'
         """;
     executeUpdate(sql, ps -> ps.setObject(1, id));
+  }
+
+  public boolean recordInboxReceived(String messageId, String topic, String consumerName, String payloadHash) {
+    UUID id = UUID.randomUUID();
+    String sql = """
+        INSERT INTO inbox_events (id, message_id, topic, consumer_name, payload_hash, status)
+        VALUES (?, ?, ?, ?, ?, 'RECEIVED')
+        """;
+    try (Connection connection = dataSource.getConnection();
+         PreparedStatement ps = connection.prepareStatement(sql)) {
+      ps.setObject(1, id);
+      ps.setString(2, messageId);
+      ps.setString(3, topic);
+      ps.setString(4, consumerName);
+      ps.setString(5, payloadHash);
+      ps.executeUpdate();
+      return true;
+    } catch (SQLException e) {
+      if ("23505".equals(e.getSQLState())) {
+        return false;
+      }
+      throw new RegistryStorageException("Failed to record inbox event", e);
+    }
+  }
+
+  public void markInboxProcessed(String messageId, String consumerName) {
+    String sql = """
+        UPDATE inbox_events
+        SET status = 'PROCESSED', processed_at = now()
+        WHERE message_id = ? AND consumer_name = ?
+        """;
+    executeUpdate(sql, ps -> {
+      ps.setString(1, messageId);
+      ps.setString(2, consumerName);
+    });
+  }
+
+  public void markInboxIgnored(String messageId, String consumerName) {
+    String sql = """
+        UPDATE inbox_events
+        SET status = 'IGNORED', processed_at = now()
+        WHERE message_id = ? AND consumer_name = ? AND status = 'RECEIVED'
+        """;
+    executeUpdate(sql, ps -> {
+      ps.setString(1, messageId);
+      ps.setString(2, consumerName);
+    });
+  }
+
+  public void markInboxFailed(String messageId, String consumerName, String errorMessage) {
+    String sql = """
+        UPDATE inbox_events
+        SET status = 'FAILED', processed_at = now(), error_message = ?
+        WHERE message_id = ? AND consumer_name = ?
+        """;
+    executeUpdate(sql, ps -> {
+      ps.setString(1, errorMessage);
+      ps.setString(2, messageId);
+      ps.setString(3, consumerName);
+    });
+  }
+
+  public void completeExportJob(UUID exportJobId, String artifactUri) {
+    String sql = """
+        UPDATE export_jobs
+        SET status = 'COMPLETED', artifact_uri = ?, updated_at = now()
+        WHERE id = ?
+        """;
+    executeUpdate(sql, ps -> {
+      ps.setString(1, artifactUri);
+      ps.setObject(2, exportJobId);
+    });
+  }
+
+  public void failExportJob(UUID exportJobId, String errorMessage) {
+    String sql = """
+        UPDATE export_jobs
+        SET status = 'FAILED', error_message = ?, updated_at = now()
+        WHERE id = ?
+        """;
+    executeUpdate(sql, ps -> {
+      ps.setString(1, errorMessage);
+      ps.setObject(2, exportJobId);
+    });
+  }
+
+  public void insertDlqEvent(
+      String originalTopic,
+      String dlqTopic,
+      String consumerName,
+      String messageId,
+      UUID sagaId,
+      UUID correlationId,
+      String failureClass,
+      String failureMessage,
+      int retryCount,
+      boolean replayEligible,
+      String payload,
+      String headers
+  ) {
+    UUID id = UUID.randomUUID();
+    String sql = """
+        INSERT INTO dlq_events (
+          id, original_topic, dlq_topic, consumer_name, message_id, saga_id, correlation_id,
+          failure_class, failure_message, retry_count, replay_eligible, payload, headers
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb)
+        """;
+    executeUpdate(sql, ps -> {
+      ps.setObject(1, id);
+      ps.setString(2, originalTopic);
+      ps.setString(3, dlqTopic);
+      ps.setString(4, consumerName);
+      ps.setString(5, messageId);
+      ps.setObject(6, sagaId);
+      ps.setObject(7, correlationId);
+      ps.setString(8, failureClass);
+      ps.setString(9, failureMessage);
+      ps.setInt(10, retryCount);
+      ps.setBoolean(11, replayEligible);
+      ps.setString(12, payload);
+      ps.setString(13, headers);
+    });
   }
 
   private UUID loadTenantIdForAgentVersion(UUID agentId, UUID agentVersionId) {

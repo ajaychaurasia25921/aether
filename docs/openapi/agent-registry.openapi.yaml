@@ -1,0 +1,446 @@
+openapi: 3.1.0
+info:
+  title: Aegis Flow Agent Registry Service
+  version: 0.1.0
+  description: >
+    REST API for tenant registration, agent metadata, LangGraph-backed agent
+    versions, and OCI export job requests in the Aegis Flow control plane.
+servers:
+  - url: http://localhost:8081
+    description: Local Quarkus development server
+  - url: https://api.aegis-flow.example.com
+    description: Production API gateway placeholder
+tags:
+  - name: Tenants
+    description: Tenant lifecycle operations.
+  - name: Agents
+    description: Agent metadata and version operations.
+  - name: Exports
+    description: Export saga entry points for Docker, Kubernetes, Helm, and OCI bundles.
+security:
+  - keycloakBearer: []
+paths:
+  /api/v1/tenants:
+    post:
+      tags: [Tenants]
+      operationId: createTenant
+      summary: Create a tenant
+      description: Creates an active tenant namespace for agents and runtime policy boundaries.
+      security:
+        - keycloakBearer:
+            - tenant-admin
+            - platform-admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTenantRequest'
+            examples:
+              acme:
+                value:
+                  slug: acme
+                  name: Acme Corp
+      responses:
+        '201':
+          description: Tenant created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/agents:
+    post:
+      tags: [Agents]
+      operationId: createAgent
+      summary: Create an agent
+      description: Creates a draft agent under a tenant.
+      security:
+        - keycloakBearer:
+            - agent-designer
+            - tenant-admin
+            - platform-admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAgentRequest'
+            examples:
+              supportAgent:
+                value:
+                  tenantId: 7d1d62db-fb0d-4378-b6e1-bd9d2f67a010
+                  slug: support-agent
+                  name: Support Agent
+                  description: Handles support triage and CRM lookup
+                  ownerUserId: 21b52e5d-d91d-4584-aa4a-ff7ad6258f16
+      responses:
+        '201':
+          description: Agent created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/agents/{agentId}:
+    get:
+      tags: [Agents]
+      operationId: getAgent
+      summary: Get an agent
+      description: Returns agent metadata by ID.
+      security:
+        - keycloakBearer:
+            - agent-designer
+            - operator
+            - auditor
+            - viewer
+            - tenant-admin
+            - platform-admin
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+      responses:
+        '200':
+          description: Agent found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/agents/{agentId}/versions:
+    post:
+      tags: [Agents]
+      operationId: createAgentVersion
+      summary: Create an agent version
+      description: >
+        Creates a draft immutable agent version. The version references a
+        LangGraph runtime type and a configuration hash used by export validation.
+      security:
+        - keycloakBearer:
+            - agent-designer
+            - tenant-admin
+            - platform-admin
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAgentVersionRequest'
+            examples:
+              langGraphVersion:
+                value:
+                  version: 1.0.0
+                  runtimeType: LANGGRAPH
+                  configHash: sha256:7d8f
+                  createdBy: 21b52e5d-d91d-4584-aa4a-ff7ad6258f16
+      responses:
+        '201':
+          description: Agent version created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentVersionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/agents/{agentId}/versions/{agentVersionId}/export:
+    post:
+      tags: [Exports]
+      operationId: requestAgentExport
+      summary: Request an agent export
+      description: >
+        Starts the export saga by writing an export job and transactional outbox
+        event in one database transaction. The exported artifact can target an
+        OCI bundle, Docker image, Kubernetes manifests, or Helm package.
+      security:
+        - keycloakBearer:
+            - agent:export
+            - agent-designer
+            - operator
+            - tenant-admin
+            - platform-admin
+      parameters:
+        - $ref: '#/components/parameters/AgentId'
+        - $ref: '#/components/parameters/AgentVersionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateExportRequest'
+            examples:
+              ociBundle:
+                value:
+                  targetFormat: OCI_BUNDLE
+                  requestedBy: 21b52e5d-d91d-4584-aa4a-ff7ad6258f16
+      responses:
+        '202':
+          description: Export saga accepted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportJobResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+components:
+  securitySchemes:
+    keycloakBearer:
+      type: oauth2
+      description: >
+        Keycloak-issued bearer token. Human dashboard sessions use Authorization
+        Code + PKCE. Platform services and agent runtime identities use
+        client_credentials with least-privilege client scopes.
+      flows:
+        authorizationCode:
+          authorizationUrl: http://localhost:8180/realms/aether/protocol/openid-connect/auth
+          tokenUrl: http://localhost:8180/realms/aether/protocol/openid-connect/token
+          scopes:
+            openid: OpenID Connect identity scope.
+            profile: User profile claims.
+            email: User email claim.
+            agent:read: Read agent metadata.
+            agent:export: Request OCI/Docker/Kubernetes/Helm exports.
+            deployment:request: Request deployment workflows.
+        clientCredentials:
+          tokenUrl: http://localhost:8180/realms/aether/protocol/openid-connect/token
+          scopes:
+            agent:read: Read agent metadata.
+            agent:export: Request exports.
+            agent:execute: Execute agent workflows.
+            event:publish: Publish platform events.
+            tool:invoke:crm: Invoke approved CRM tool actions.
+            memory:read: Read runtime memory.
+            memory:write: Write runtime memory.
+            workflow:transition: Advance LangGraph workflow state.
+  parameters:
+    AgentId:
+      name: agentId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Agent identifier.
+    AgentVersionId:
+      name: agentVersionId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Agent version identifier.
+  schemas:
+    CreateTenantRequest:
+      type: object
+      required: [slug, name]
+      properties:
+        slug:
+          type: string
+          minLength: 1
+          maxLength: 120
+          pattern: '^[a-z0-9][a-z0-9-]*$'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+    TenantResponse:
+      type: object
+      required: [id, slug, name, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+          enum: [ACTIVE]
+    CreateAgentRequest:
+      type: object
+      required: [tenantId, slug, name, ownerUserId]
+      properties:
+        tenantId:
+          type: string
+          format: uuid
+        slug:
+          type: string
+          minLength: 1
+          maxLength: 120
+          pattern: '^[a-z0-9][a-z0-9-]*$'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        description:
+          type: string
+        ownerUserId:
+          type: string
+          format: uuid
+    AgentResponse:
+      type: object
+      required: [id, tenantId, slug, name, ownerUserId, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        ownerUserId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [DRAFT, ACTIVE, DISABLED, ARCHIVED]
+    CreateAgentVersionRequest:
+      type: object
+      required: [version, runtimeType, configHash, createdBy]
+      properties:
+        version:
+          type: string
+          minLength: 1
+          maxLength: 40
+          examples: ['1.0.0']
+        runtimeType:
+          type: string
+          enum: [LANGGRAPH]
+        configHash:
+          type: string
+          minLength: 1
+          examples: ['sha256:7d8f']
+        createdBy:
+          type: string
+          format: uuid
+    AgentVersionResponse:
+      type: object
+      required: [id, agentId, version, status, runtimeType, configHash]
+      properties:
+        id:
+          type: string
+          format: uuid
+        agentId:
+          type: string
+          format: uuid
+        version:
+          type: string
+        status:
+          type: string
+          enum: [DRAFT, VALIDATED, EXPORTABLE, EXPORTED, DEPLOYED, DEPRECATED, FAILED]
+        runtimeType:
+          type: string
+          enum: [LANGGRAPH]
+        configHash:
+          type: string
+    CreateExportRequest:
+      type: object
+      required: [targetFormat, requestedBy]
+      properties:
+        targetFormat:
+          type: string
+          enum: [DOCKER, KUBERNETES, HELM, OCI_BUNDLE]
+        requestedBy:
+          type: string
+          format: uuid
+    ExportJobResponse:
+      type: object
+      required: [exportJobId, sagaId, agentVersionId, status, targetFormat]
+      properties:
+        exportJobId:
+          type: string
+          format: uuid
+        sagaId:
+          type: string
+          format: uuid
+        agentVersionId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [PENDING, VALIDATING, IDENTITY_READY, COMPILING_WORKFLOW, PACKAGING, PUBLISHING, COMPLETED, FAILED, CANCELLED]
+        targetFormat:
+          type: string
+          enum: [DOCKER, KUBERNETES, HELM, OCI_BUNDLE]
+    ErrorResponse:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+        code:
+          type: string
+        correlationId:
+          type: string
+          format: uuid
+  responses:
+    BadRequest:
+      description: Invalid request.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Missing or invalid bearer token.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Authenticated principal lacks the required role or client scope.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: Unique constraint or lifecycle conflict.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
